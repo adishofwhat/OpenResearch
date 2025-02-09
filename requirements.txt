@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+langchain
+autogen
+psycopg2-binary
+redis
+transformers
+huggingface_hub
+pydantic
+aiohttp
+weaviate-client
