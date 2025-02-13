@@ -77,7 +77,7 @@ def search_objects(name: str = Query(None), tag: str = Query(None)):
             {{
               Get {{
                 Research(where: {{
-                  operator: Contains,
+                  operator: Equal,
                   path: ["tags"],
                   valueText: "{tag}"
                 }}) {{
@@ -95,7 +95,7 @@ def search_objects(name: str = Query(None), tag: str = Query(None)):
         r = requests.post("http://weaviate:8080/v1/graphql", json=query)
         if r.status_code != 200:
             raise Exception(f"GraphQL query failed with status code {r.status_code}: {r.text}")
-
+        
         response_json = r.json()
         if "data" not in response_json:
             raise Exception(f"GraphQL query returned no 'data' key: {response_json}")
@@ -105,12 +105,13 @@ def search_objects(name: str = Query(None), tag: str = Query(None)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error searching objects: {str(e)}")
 
+
 @app.put("/update-object/{object_id}")
 def update_object(object_id: str, updated_object: ResearchObject):
     try:
         client.collections.get("Research").data.update(
             uuid=object_id,
-            data_object={
+            properties={
                 "name": updated_object.name,
                 "description": updated_object.description,
                 "tags": updated_object.tags
@@ -124,7 +125,7 @@ def update_object(object_id: str, updated_object: ResearchObject):
 @app.delete("/delete-object/{object_id}")
 def delete_object(object_id: str):
     try:
-        client.collections.get("Research").data.delete(uuid=object_id)
+        client.collections.get("Research").data.delete_by_id(uuid=object_id)
         return {"status": "Object deleted successfully!"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error deleting object: {str(e)}")
