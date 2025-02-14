@@ -3,6 +3,8 @@ version: '3.8'
 services:
   app:
     build: .
+    env_file:
+      - .env
     container_name: openresearch-app
     volumes:
       - .:/app
@@ -44,6 +46,12 @@ services:
       - "8080:8080"
     volumes:
       - weaviate_data:/var/lib/weaviate
+  
+  searxng:
+    container_name: searxng
+    image: docker.io/searxng/searxng:latest
+    ports:
+      - "8888:8888"
 
 volumes:
   pgdata:

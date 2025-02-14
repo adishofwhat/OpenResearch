@@ -1,6 +1,8 @@
 fastapi
 uvicorn
 langchain
+langchain-community
+langchain-core
 autogen
 psycopg2-binary
 redis

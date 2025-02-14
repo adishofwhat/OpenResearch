@@ -1,9 +1,13 @@
 import weaviate
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from typing import List
-from fastapi import Query
 import requests
+import os
+
+from langchain_core.prompts import PromptTemplate
+from langchain.chains import LLMChain
+from langchain_community.llms import HuggingFaceHub  # FIXED
 
 app = FastAPI()
 
@@ -19,6 +23,9 @@ class ResearchObject(BaseModel):
     name: str
     description: str
     tags: List[str] = []
+
+class ResearchQuery(BaseModel):
+    query: str
 
 @app.get("/")
 def read_root():
@@ -129,3 +136,61 @@ def delete_object(object_id: str):
         return {"status": "Object deleted successfully!"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error deleting object: {str(e)}")
+    
+llm = HuggingFaceHub(repo_id="deepseek-ai/DeepSeek-R1-Distill-Llama-70B", model_kwargs={"temperature": 0.5})
+
+decomposition_template = """
+You are an advanced research assistant. Your job is to break down a complex research question into four detailed sub-questions.
+
+Research Query: {query}
+
+Sub-questions:
+1.
+2.
+3.
+4.
+"""
+prompt_template = PromptTemplate(input_variables=["query"], template=decomposition_template)
+decomposition_chain = LLMChain(llm=llm, prompt=prompt_template)
+
+# Web Search Function (SearxNG)
+def search_online(query: str) -> List[str]:
+    try:
+        response = requests.get(f"http://localhost:8888/search?q={query}&format=json")
+        results = response.json()["results"]
+        return [result["title"] + " - " + result["url"] for result in results[:3]]
+    except Exception as e:
+        return [f"Error retrieving search results: {str(e)}"]
+
+# AI Research Orchestration Functions
+def decompose_query(query: str) -> List[str]:
+    result = decomposition_chain.run(query=query)
+    sub_questions = [line.split(".", 1)[1].strip() for line in result.split("\n") if line.strip() and line[0].isdigit()]
+    return sub_questions
+
+def retrieve_data(sub_question: str) -> List[str]:
+    web_results = search_online(sub_question)
+    return web_results
+
+def summarize_data(retrieved_data: List[str]) -> List[str]:
+    return [f"Summary: {data}" for data in retrieved_data]
+
+def synthesize_report(summaries: List[str]) -> str:
+    return "Final Research Report:\n" + "\n".join(summaries)
+
+@app.post("/research/")
+def perform_research(research_query: ResearchQuery):
+    try:
+        sub_questions = decompose_query(research_query.query)
+        retrieved = [retrieve_data(q) for q in sub_questions]
+        summaries = summarize_data([item for sublist in retrieved for item in sublist])
+        final_report = synthesize_report(summaries)
+
+        return {
+            "original_query": research_query.query,
+            "sub_questions": sub_questions,
+            "summaries": summaries,
+            "final_report": final_report
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error during research orchestration: {str(e)}")
