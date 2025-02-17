@@ -51,7 +51,9 @@ services:
     container_name: searxng
     image: docker.io/searxng/searxng:latest
     ports:
-      - "8888:8888"
+      - "8888:8080"
+    volumes:
+      - ./searxng_settings.yml:/etc/searxng/settings.yml
 
 volumes:
   pgdata:
