@@ -14,6 +14,7 @@ services:
       - postgres
       - redis
       - weaviate
+      - searxng
 
   postgres:
     image: postgres:13
