@@ -16,6 +16,7 @@ class ResearchConfig(BaseModel):
     output_format: Literal["full_report", "executive_summary", "bullet_list"] = "full_report"
     research_speed: Literal["fast", "deep"] = "deep"
     depth_and_breadth: int = Field(default=3, ge=1, le=5, description="Depth and breadth of research on scale 1-5")
+    skip_clarification: bool = Field(default=False, description="Whether to skip the clarification phase")
 
 class ResearchResponse(BaseModel):
     """Response model for research initialization."""
