@@ -17,7 +17,6 @@ from app.agents.research_agents import (
     generate_final_report
 )
 
-# Configure logging
 logger = logging.getLogger(__name__)
 
 class ResearchOrchestrator:
@@ -39,7 +38,6 @@ class ResearchOrchestrator:
         Returns:
             The initial research state
         """
-        # Create default config if not provided
         if config is None:
             config = {
                 "research_speed": "balanced",
@@ -48,7 +46,6 @@ class ResearchOrchestrator:
                 "skip_clarification": False
             }
         
-        # Create the research config
         research_config = ResearchConfig(
             research_speed=config.get("research_speed", "balanced"),
             output_format=config.get("output_format", "full_report"),
@@ -56,7 +53,6 @@ class ResearchOrchestrator:
             skip_clarification=config.get("skip_clarification", False)
         )
         
-        # Create the initial state
         initial_state = ResearchState(
             session_id=session_id,
             original_query=query,
@@ -67,7 +63,6 @@ class ResearchOrchestrator:
             errors=[]
         )
         
-        # Store the session
         self.active_sessions[session_id] = {
             "state": initial_state,
             "config": research_config
@@ -100,7 +95,6 @@ class ResearchOrchestrator:
             The updated research state
         """
         try:
-            # Determine which step to run based on the current status
             if state.status == "initialized":
                 return generate_clarification_questions(state)
             elif state.status == "clarification_needed" and state.clarification_answers:
@@ -108,7 +102,6 @@ class ResearchOrchestrator:
             elif state.status == "query_refined":
                 return decompose_query(state)
             elif state.status == "query_decomposed":
-                # Track attempt to help with auto-progression
                 state.decomposition_attempts += 1
                 return search_web(state)
             elif state.status == "search_completed":
@@ -116,36 +109,27 @@ class ResearchOrchestrator:
             elif state.status == "summaries_completed":
                 return generate_final_report(state)
             else:
-                # If we don't know what to do, try to recover
                 logger.warning(f"Unknown state: {state.status}, attempting to recover")
                 
-                # Try to determine the next logical step
                 if state.final_report:
-                    # If we have a final report, we're done
                     state.status = "completed"
                     state.progress = 1.0
                 elif state.summaries:
-                    # If we have summaries, generate the final report
                     state.status = "summaries_completed"
                     return generate_final_report(state)
                 elif state.search_results:
-                    # If we have search results, summarize them
                     state.status = "search_completed"
                     return summarize_and_fact_check(state)
                 elif state.sub_questions:
-                    # If we have sub-questions, search for them
                     state.status = "query_decomposed"
                     return search_web(state)
                 elif state.clarified_query:
-                    # If we have a clarified query, decompose it
                     state.status = "query_refined"
                     return decompose_query(state)
                 elif state.clarification_answers:
-                    # If we have clarification answers, process them
                     state.status = "clarification_needed"
                     return process_clarifications(state)
                 else:
-                    # If we can't determine the next step, start from the beginning
                     state.status = "initialized"
                     return generate_clarification_questions(state)
         except Exception as e:
@@ -153,11 +137,9 @@ class ResearchOrchestrator:
             logger.error(error_msg)
             state.errors.append(error_msg)
             
-            # Don't immediately set to error state, try to recover
             if state.status != "error":
                 state.log.append(f"Orchestrator: Error in workflow step - {str(e)}, attempting to recover")
                 
-                # Try to advance to the next state despite the error
                 if state.status == "initialized":
                     state.status = "query_refined"
                     state.clarified_query = state.original_query
@@ -175,7 +157,6 @@ class ResearchOrchestrator:
                 elif state.status == "summaries_completed":
                     return generate_final_report(state)
             
-            # If we can't recover, set to error state
             state.status = "error"
             state.log.append(f"Orchestrator: Error - {str(e)}")
             return state
@@ -194,15 +175,12 @@ class ResearchOrchestrator:
             logger.error(f"Session {session_id} not found")
             raise ValueError(f"Session {session_id} not found")
         
-        # Get the initial state
         state = session["state"]
         
-        # Start the workflow
         try:
             logger.info(f"Starting research workflow for session {session_id}")
             state.log.append("Starting research workflow")
             
-            # Check if user has specified to skip clarification in config
             if state.config.skip_clarification:
                 logger.info("Skipping clarification phase as specified in config")
                 state.log.append("Skipping clarification phase as specified in config")
@@ -210,15 +188,12 @@ class ResearchOrchestrator:
                 state.clarified_query = state.original_query
                 updated_state = decompose_query(state)
             else:
-                # Run the first step (generate clarification questions)
                 updated_state = self._run_workflow_step(state)
                 
-                # If we're in fast research mode, auto-continue without waiting for clarification
                 if updated_state.status == "clarification_needed" and state.config.research_speed == "fast":
                     logger.info("Fast research mode: auto-continuing without clarification")
                     state.log.append("Fast research mode: auto-continuing without clarification")
                     
-                    # Create default answers
                     default_answers = {}
                     for question in updated_state.clarification_questions:
                         default_answers[question] = "No specific preference. Please proceed with general information."
@@ -226,7 +201,6 @@ class ResearchOrchestrator:
                     updated_state.clarification_answers = default_answers
                     updated_state = process_clarifications(updated_state)
             
-            # Update the session state
             session["state"] = updated_state
             
             logger.info(f"Research workflow started for session {session_id}, status: {updated_state.status}")
@@ -237,19 +211,16 @@ class ResearchOrchestrator:
             logger.error(error_msg)
             state.errors.append(error_msg)
             
-            # Try to recover from initialization errors
             if state.status == "initialized" or state.status == "":
                 state.log.append(f"Orchestrator: Error during initialization - {str(e)}, attempting to recover")
                 state.status = "query_refined"
                 state.clarified_query = state.original_query
                 
                 try:
-                    # Try to skip to decomposition
                     state = decompose_query(state)
                     session["state"] = state
                     return state
                 except Exception as e2:
-                    # If recovery fails, set to error state
                     state.errors.append(f"Recovery attempt failed: {str(e2)}")
                     state.status = "error"
             else:
@@ -274,15 +245,12 @@ class ResearchOrchestrator:
             logger.error(f"Session {session_id} not found")
             raise ValueError(f"Session {session_id} not found")
         
-        # Get the current state
         state = session["state"]
         
-        # Add the answers
         state.clarification_answers = answers
         state.clarification_attempts += 1
         state.log.append(f"Added {len(answers)} clarification answers")
         
-        # Update the session state
         session["state"] = state
         
         logger.info(f"Added clarification answers to session {session_id}")
@@ -302,42 +270,33 @@ class ResearchOrchestrator:
             logger.error(f"Session {session_id} not found")
             raise ValueError(f"Session {session_id} not found")
         
-        # Get the current state
         state = session["state"]
         
-        # Continue the workflow
         try:
             logger.info(f"Continuing research workflow for session {session_id}")
             state.log.append("Continuing research workflow")
             
-            # If we're in clarification_needed state but don't have answers and have waited too long,
-            # auto-continue with default answers
             if state.status == "clarification_needed" and not state.clarification_answers:
-                # Check if we've been in this state for too long (auto-continue after 3 attempts)
                 if state.clarification_attempts >= 3:
                     logger.info(f"Auto-continuing after {state.clarification_attempts} clarification attempts")
                     state.log.append("Auto-continuing with default answers after timeout")
                     
-                    # Create default answers
                     default_answers = {}
                     for question in state.clarification_questions:
                         default_answers[question] = "No specific preference. Please proceed with general information."
                     
                     state.clarification_answers = default_answers
             
-            # Check if we've been stuck in query_decomposed state for too long
             if state.status == "query_decomposed" and state.decomposition_attempts >= 2:
                 logger.info(f"Auto-continuing from query_decomposed after {state.decomposition_attempts} attempts")
                 state.log.append("Auto-continuing from query_decomposed state due to timeout")
                 
-                # Force progression to search_completed with fallback content
                 if not state.search_results and state.sub_questions:
                     state.search_results = {}
-                    for question in state.sub_questions[:2]:  # Just use the first 2 questions
+                    for question in state.sub_questions[:2]:
                         from app.services.search_api import search_service
                         fallback_results = search_service.get_fallback_content(question)
                         
-                        # Format the results for the state
                         formatted_results = [
                             f"Title: {result['title']}\nURL: {result['url']}\nContent: {result['content']}"
                             for result in fallback_results
@@ -350,23 +309,18 @@ class ResearchOrchestrator:
                 updated_state = state
                 state.decomposition_attempts += 1
             else:
-                # Run the next step in the workflow
                 updated_state = self._run_workflow_step(state)
                 
-                # If we're in query_decomposed state, increment the attempt counter
                 if updated_state.status == "query_decomposed":
                     updated_state.decomposition_attempts += 1
             
-            # If the status hasn't changed, try to force progression
             if updated_state.status == state.status and updated_state.status != "completed":
                 logger.info(f"Forcing progression from {updated_state.status} state")
                 state.log.append(f"Forcing progression from {updated_state.status} state")
                 
-                # Force progression based on current state
                 if updated_state.status == "initialized":
                     updated_state = generate_clarification_questions(updated_state)
                 elif updated_state.status == "clarification_needed":
-                    # If we're stuck in clarification, create default answers and proceed
                     if not updated_state.clarification_answers:
                         default_answers = {}
                         for question in updated_state.clarification_questions:
@@ -382,7 +336,6 @@ class ResearchOrchestrator:
                 elif updated_state.status == "summaries_completed":
                     updated_state = generate_final_report(updated_state)
             
-            # Update the session state
             session["state"] = updated_state
             
             logger.info(f"Research workflow continued for session {session_id}, new status: {updated_state.status}")
@@ -393,11 +346,9 @@ class ResearchOrchestrator:
             logger.error(error_msg)
             state.errors.append(error_msg)
             
-            # Don't immediately set to error state, try to recover
             if state.status != "error":
                 state.log.append(f"Orchestrator: Error - {str(e)}, attempting to recover")
                 
-                # Try to advance to the next state despite the error
                 if state.status == "initialized":
                     state.status = "query_refined"
                     state.clarified_query = state.original_query
@@ -413,7 +364,6 @@ class ResearchOrchestrator:
                 elif state.status == "summaries_completed":
                     state = generate_final_report(state)
                 else:
-                    # If we can't recover, set to error state
                     state.status = "error"
             
             session["state"] = state
@@ -433,26 +383,21 @@ class ResearchOrchestrator:
             logger.error(f"Session {session_id} not found")
             raise ValueError(f"Session {session_id} not found")
         
-        # Get the initial state
         state = session["state"]
         
-        # Run the full workflow
         try:
             logger.info(f"Running full research workflow for session {session_id}")
             state.log.append("Running full research workflow")
             
-            # Skip clarification and run all steps in sequence
-            state.status = "query_refined"  # Skip clarification
-            state.clarified_query = state.original_query  # Use original query
+            state.status = "query_refined"
+            state.clarified_query = state.original_query
             
-            # Run each step in sequence with error handling
             try:
                 state = decompose_query(state)
             except Exception as e:
                 logger.error(f"Error in decompose_query: {str(e)}")
                 state.log.append(f"Error in decompose_query: {str(e)}, attempting to continue")
                 state.errors.append(f"Error in decompose_query: {str(e)}")
-                # Create default sub-questions to continue
                 if not state.sub_questions:
                     state.sub_questions = [
                         f"What is {state.original_query}?",
@@ -470,7 +415,6 @@ class ResearchOrchestrator:
                     logger.error(f"Error in search_web: {str(e)}")
                     state.log.append(f"Error in search_web: {str(e)}, attempting to continue")
                     state.errors.append(f"Error in search_web: {str(e)}")
-                    # Provide fallback search results to continue
                     if not state.search_results and state.sub_questions:
                         state.search_results = {}
                         for question in state.sub_questions:
@@ -486,7 +430,6 @@ class ResearchOrchestrator:
                     logger.error(f"Error in summarize_and_fact_check: {str(e)}")
                     state.log.append(f"Error in summarize_and_fact_check: {str(e)}, attempting to continue")
                     state.errors.append(f"Error in summarize_and_fact_check: {str(e)}")
-                    # Create basic summaries to continue
                     if not state.summaries and state.search_results:
                         state.summaries = {}
                         for question, results in state.search_results.items():
@@ -501,7 +444,6 @@ class ResearchOrchestrator:
                     logger.error(f"Error in generate_final_report: {str(e)}")
                     state.log.append(f"Error in generate_final_report: {str(e)}")
                     state.errors.append(f"Error in generate_final_report: {str(e)}")
-                    # Create a basic final report
                     state.final_report = f"# Research Report on {state.original_query}\n\n"
                     state.final_report += "## Executive Summary\n\n"
                     state.final_report += f"This report provides an overview of {state.original_query}. Due to processing limitations, only basic information could be compiled.\n\n"
@@ -517,7 +459,6 @@ class ResearchOrchestrator:
                     state.status = "completed"
                     state.progress = 1.0
             
-            # Update the session state
             session["state"] = state
             
             logger.info(f"Full research workflow completed for session {session_id}, status: {state.status}")

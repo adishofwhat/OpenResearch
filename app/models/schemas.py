@@ -55,7 +55,7 @@ class ResearchState(BaseModel):
     progress: float = 0.0
     status: str = "initiated"
     errors: List[str] = []
-    log: List[str] = []  # Added field for tracking inter-agent communication
+    log: List[str] = []
     clarification_attempts: int = 0
     decomposition_attempts: int = 0
     

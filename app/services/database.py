@@ -3,7 +3,6 @@ from weaviate.connect import ConnectionParams
 import logging
 from app.models.schemas import ResearchObject
 
-# Configure logging
 logger = logging.getLogger(__name__)
 
 class WeaviateService:
@@ -37,10 +36,8 @@ class WeaviateService:
             logger.info(f"Weaviate connection status: {self.is_connected}")
             
             if self.is_connected:
-                # Create Research collection if it doesn't exist
                 collections = self.client.collections.list_all()
                 if "Research" not in collections:
-                    # Using the new API for Weaviate client v4+
                     research_collection = self.client.collections.create(
                         name="Research",
                         properties=[
@@ -102,5 +99,4 @@ class WeaviateService:
             logger.error(f"Error fetching research objects: {e}")
             return []
 
-# Create a singleton instance
 weaviate_service = WeaviateService()

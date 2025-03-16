@@ -2,25 +2,57 @@ import requests
 import logging
 from typing import List, Dict, Any, Optional
 import time
+import random
+import os
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
-# Configure logging
 logger = logging.getLogger(__name__)
 
 class SearchService:
     """Service for performing web searches using SearxNG."""
     
-    def __init__(self, base_url="http://localhost:8888", timeout=5):
+    def __init__(self, base_url=None, timeout=5, use_fallback=None):
         """Initialize the search service with the SearxNG URL.
         
         Args:
             base_url: The base URL of the SearxNG instance
             timeout: The timeout for search requests in seconds
+            use_fallback: Whether to use fallback content (None = auto-detect)
         """
+        if base_url is None:
+            base_url = os.getenv("SEARXNG_URL", "http://localhost:8888")
+        
         self.base_url = base_url
         self.timeout = timeout
-        self.max_retries = 1  # Reduced to 1 to fail faster
-        self.use_fallback = True  # Always use fallback content
+        self.max_retries = 2
         
+        self._searxng_available = False
+        if use_fallback is None:
+            self._searxng_available = self._check_searxng_available()
+        else:
+            self._searxng_available = not use_fallback
+            
+        if not self._searxng_available:
+            logger.warning("SearxNG not available. Using fallback content for all searches.")
+        else:
+            logger.info(f"SearxNG available at {self.base_url}")
+        
+        self._cache = {}
+        
+    def _check_searxng_available(self) -> bool:
+        """Check if SearxNG is available."""
+        try:
+            response = requests.get(f"{self.base_url}/healthz", timeout=2)
+            return response.status_code == 200
+        except Exception as e:
+            logger.warning(f"SearxNG health check failed: {str(e)}")
+            return False
+    
+    @retry(
+        stop=stop_after_attempt(2),
+        wait=wait_exponential(multiplier=1, min=1, max=3),
+        retry=retry_if_exception_type((requests.exceptions.Timeout, requests.exceptions.ConnectionError))
+    )
     def search(self, query: str, num_results: int = 5) -> List[Dict[str, str]]:
         """Perform a search using SearxNG.
         
@@ -31,66 +63,74 @@ class SearchService:
         Returns:
             A list of search results, each containing title, URL, and content
         """
+        cache_key = f"{query}:{num_results}"
+        if cache_key in self._cache:
+            logger.info(f"Using cached results for '{query}'")
+            return self._cache[cache_key]
+        
         logger.info(f"Searching for: {query}")
         
-        # If we're set to always use fallback, skip the actual search
-        if self.use_fallback:
-            logger.info(f"Using fallback content for '{query}' (SearxNG bypassed)")
-            return self._get_fallback_for_query(query)
+        if not self._searxng_available:
+            logger.info(f"Using fallback content for '{query}' (SearxNG not available)")
+            results = self._get_fallback_for_query(query)
+            self._cache[cache_key] = results
+            return results
         
-        for attempt in range(self.max_retries + 1):
-            try:
-                logger.info(f"Search attempt {attempt + 1} for '{query}'")
+        try:
+            logger.info(f"Searching SearxNG for '{query}'")
+            
+            params = {
+                "q": query,
+                "format": "json",
+                "rand": random.randint(1, 1000000)
+            }
+            
+            response = requests.get(
+                f"{self.base_url}/search",
+                params=params,
+                timeout=self.timeout
+            )
+            
+            if response.status_code == 200:
+                results = response.json().get("results", [])
+                formatted_results = []
                 
-                # Try with a shorter timeout for faster failure
-                current_timeout = max(2, self.timeout - attempt * 1)
+                for result in results[:num_results]:
+                    content = result.get("content", "")
+                    formatted_results.append({
+                        "title": result.get("title", ""),
+                        "url": result.get("url", ""),
+                        "content": content
+                    })
                 
-                response = requests.get(
-                    f"{self.base_url}/search",
-                    params={"q": query, "format": "json"},
-                    timeout=current_timeout
-                )
-                
-                if response.status_code == 200:
-                    results = response.json().get("results", [])
-                    formatted_results = []
-                    
-                    for result in results[:num_results]:
-                        # Try to get a snippet or content
-                        content = result.get("content", "")
-                        # Include title, URL and content in a structured format
-                        formatted_results.append({
-                            "title": result.get("title", ""),
-                            "url": result.get("url", ""),
-                            "content": content
-                        })
-                    
-                    if formatted_results:
-                        logger.info(f"Found {len(formatted_results)} results for '{query}'")
-                        return formatted_results
-                    else:
-                        logger.warning(f"No results found for '{query}'")
-                        return self._get_fallback_for_query(query)
+                if formatted_results:
+                    logger.info(f"Found {len(formatted_results)} results for '{query}'")
+                    self._cache[cache_key] = formatted_results
+                    return formatted_results
                 else:
-                    logger.warning(f"Search returned status code {response.status_code}")
-                    if attempt < self.max_retries:
-                        time.sleep(0.5)  # Shorter wait before retrying
-                        continue
-                    return self._get_fallback_for_query(query)
-                    
-            except requests.exceptions.Timeout:
-                logger.warning(f"Search timed out for '{query}' (attempt {attempt + 1})")
-                if attempt < self.max_retries:
-                    time.sleep(0.5)  # Shorter wait before retrying
-                    continue
-                return self._get_fallback_for_query(query)
+                    logger.warning(f"No results found for '{query}'")
+                    results = self._get_fallback_for_query(query)
+                    self._cache[cache_key] = results
+                    return results
+            else:
+                logger.warning(f"Search returned status code {response.status_code}")
+                self._searxng_available = False
+                results = self._get_fallback_for_query(query)
+                self._cache[cache_key] = results
+                return results
                 
-            except Exception as e:
-                logger.error(f"Error searching for '{query}': {str(e)}")
-                return self._get_fallback_for_query(query)
-        
-        # If we get here, all retries failed
-        return self._get_fallback_for_query(query)
+        except requests.exceptions.Timeout:
+            logger.warning(f"Search timed out for '{query}'")
+            results = self._get_fallback_for_query(query)
+            self._cache[cache_key] = results
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error searching for '{query}': {str(e)}")
+            self._searxng_available = False
+            results = self._get_fallback_for_query(query)
+            self._cache[cache_key] = results
+            return results
     
     def _get_fallback_for_query(self, query: str) -> List[Dict[str, str]]:
         """Get fallback content for a specific query.
@@ -115,7 +155,6 @@ class SearchService:
         """
         logger.info(f"Providing fallback content for: {query}")
         
-        # Create fallback content for AI-related questions
         fallback_content = {
             "What is AI?": [
                 {
@@ -168,7 +207,6 @@ class SearchService:
             ]
         }
         
-        # Add generic fallback content for common question patterns
         generic_fallbacks = {
             "What is": [
                 {
@@ -193,12 +231,10 @@ class SearchService:
             ]
         }
         
-        # Find the most similar question in our fallback content
         best_match = None
         highest_similarity = 0
         
         for fallback_question in fallback_content:
-            # Simple word overlap similarity
             words_q1 = set(query.lower().split())
             words_q2 = set(fallback_question.lower().split())
             overlap = len(words_q1.intersection(words_q2))
@@ -208,18 +244,15 @@ class SearchService:
                 highest_similarity = similarity
                 best_match = fallback_question
         
-        # If we found a reasonable match, use its content
         if best_match and highest_similarity > 0.3:
             logger.info(f"Using fallback content for '{query}' (matched with '{best_match}')")
             return fallback_content[best_match]
         
-        # Check for generic patterns
         for pattern, content in generic_fallbacks.items():
             if pattern.lower() in query.lower():
                 logger.info(f"Using generic '{pattern}' fallback for '{query}'")
                 return content
         
-        # Otherwise, provide a generic response
         logger.info(f"Using completely generic fallback for '{query}'")
         return [
             {
@@ -228,6 +261,10 @@ class SearchService:
                 "content": f"Due to search limitations, specific information could not be retrieved. This question would typically explore aspects related to {query}."
             }
         ]
+    
+    def reset_availability(self):
+        """Reset the availability of SearxNG and check again."""
+        self._searxng_available = self._check_searxng_available()
+        return self._searxng_available
 
-# Create a singleton instance
 search_service = SearchService()

@@ -14,17 +14,14 @@ from pydantic import BaseModel, Field
 
 from app.models.schemas import ResearchState, ResearchConfig
 from app.agents.orchestrator import ResearchOrchestrator
+from app.models.llm import llm_provider
 
-# Configure logging
 logger = logging.getLogger(__name__)
 
-# Create the router
 router = APIRouter(prefix="/research", tags=["research"])
 
-# Create the orchestrator
 orchestrator = ResearchOrchestrator()
 
-# Request and response models
 class ResearchRequest(BaseModel):
     """Request model for creating a research session."""
     query: str = Field(..., description="The research query")
@@ -56,19 +53,21 @@ async def create_research_session(request: ResearchRequest, background_tasks: Ba
         The research response
     """
     try:
-        # Generate a unique session ID
+        if request.config and "model_id" in request.config:
+            model_id = request.config.get("model_id")
+            logger.info(f"Setting model to: {model_id}")
+            success = llm_provider.set_model(model_id)
+            if not success:
+                logger.warning(f"Failed to set model to {model_id}, using default model")
+        
         session_id = str(uuid.uuid4())
         
-        # Create the session
         state = orchestrator.create_session(session_id, request.query, request.config)
         
-        # Start the research in the background
         background_tasks.add_task(orchestrator.start_research, session_id)
         
-        # Create a user-friendly status message
         status_message = get_user_friendly_status(state.status, state.progress)
         
-        # Return the initial response
         return ResearchResponse(
             session_id=session_id,
             status=state.status,
@@ -93,6 +92,14 @@ async def create_full_research_session(request: ResearchRequest, background_task
         The research response
     """
     try:
+        # Check if a model_id was provided in the config
+        if request.config and "model_id" in request.config:
+            model_id = request.config.get("model_id")
+            logger.info(f"Setting model to: {model_id}")
+            success = llm_provider.set_model(model_id)
+            if not success:
+                logger.warning(f"Failed to set model to {model_id}, using default model")
+        
         # Generate a unique session ID
         session_id = str(uuid.uuid4())
         

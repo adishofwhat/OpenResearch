@@ -12,7 +12,7 @@ redis
 pydantic>=2.0.0
 aiohttp
 weaviate-client>=4.0.0
-tenacity>=8.0.0
+tenacity>=8.2.0
 tqdm
 python-multipart
 jinja2
