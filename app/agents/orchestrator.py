@@ -287,26 +287,33 @@ class ResearchOrchestrator:
                     
                     state.clarification_answers = default_answers
             
-            if state.status == "query_decomposed" and state.decomposition_attempts >= 2:
-                logger.info(f"Auto-continuing from query_decomposed after {state.decomposition_attempts} attempts")
-                state.log.append("Auto-continuing from query_decomposed state due to timeout")
-                
-                if not state.search_results and state.sub_questions:
-                    state.search_results = {}
-                    for question in state.sub_questions[:2]:
-                        from app.services.search_api import search_service
-                        fallback_results = search_service.get_fallback_content(question)
-                        
-                        formatted_results = [
-                            f"Title: {result['title']}\nURL: {result['url']}\nContent: {result['content']}"
-                            for result in fallback_results
-                        ]
-                        
-                        state.search_results[question] = formatted_results
-                
+            # Check for repeated states to prevent loops
+            # If we're in a state with existing data, make sure we don't redo work
+            if state.status == "query_decomposed" and state.search_results and len(state.search_results) > 0:
+                logger.info(f"Already have search results but state is {state.status}, updating state to search_completed")
+                state.log.append(f"Orchestrator: Already have search results, updating state to search_completed")
                 state.status = "search_completed"
                 state.progress = 0.7
-                updated_state = state
+            
+            if state.status == "search_completed" and state.summaries and len(state.summaries) > 0:
+                logger.info(f"Already have summaries but state is {state.status}, updating state to summaries_completed")
+                state.log.append(f"Orchestrator: Already have summaries, updating state to summaries_completed")
+                state.status = "summaries_completed"
+                state.progress = 0.9
+            
+            if state.status == "summaries_completed" and state.final_report and len(state.final_report) > 500:
+                logger.info(f"Already have final report but state is {state.status}, updating state to completed")
+                state.log.append(f"Orchestrator: Already have final report, updating state to completed")
+                state.status = "completed"
+                state.progress = 1.0
+            
+            # Remove fallback content approach for query_decomposed
+            if state.status == "query_decomposed" and state.decomposition_attempts >= 2:
+                logger.info(f"Auto-continuing from query_decomposed after {state.decomposition_attempts} attempts")
+                state.log.append("Forcing progression to search phase due to timeout in query decomposition")
+                
+                state.status = "query_decomposed" 
+                updated_state = search_web(state)
                 state.decomposition_attempts += 1
             else:
                 updated_state = self._run_workflow_step(state)
@@ -314,9 +321,10 @@ class ResearchOrchestrator:
                 if updated_state.status == "query_decomposed":
                     updated_state.decomposition_attempts += 1
             
+            # Handle stalled state when the workflow step doesn't advance the state
             if updated_state.status == state.status and updated_state.status != "completed":
-                logger.info(f"Forcing progression from {updated_state.status} state")
-                state.log.append(f"Forcing progression from {updated_state.status} state")
+                logger.info(f"State has not changed from {updated_state.status}, forcing progression")
+                state.log.append(f"Orchestrator: Forcing progression from {updated_state.status} state")
                 
                 if updated_state.status == "initialized":
                     updated_state = generate_clarification_questions(updated_state)
@@ -330,9 +338,21 @@ class ResearchOrchestrator:
                 elif updated_state.status == "query_refined":
                     updated_state = decompose_query(updated_state)
                 elif updated_state.status == "query_decomposed":
-                    updated_state = search_web(updated_state)
+                    # Skip the search step if we already have search results
+                    if updated_state.search_results and len(updated_state.search_results) > 0:
+                        updated_state.status = "search_completed"
+                        updated_state.progress = 0.7
+                        updated_state = summarize_and_fact_check(updated_state)
+                    else:
+                        updated_state = search_web(updated_state)
                 elif updated_state.status == "search_completed":
-                    updated_state = summarize_and_fact_check(updated_state)
+                    # Skip the summarization step if we already have summaries
+                    if updated_state.summaries and len(updated_state.summaries) > 0:
+                        updated_state.status = "summaries_completed"
+                        updated_state.progress = 0.9
+                        updated_state = generate_final_report(updated_state)
+                    else:
+                        updated_state = summarize_and_fact_check(updated_state)
                 elif updated_state.status == "summaries_completed":
                     updated_state = generate_final_report(updated_state)
             
@@ -389,9 +409,48 @@ class ResearchOrchestrator:
             logger.info(f"Running full research workflow for session {session_id}")
             state.log.append("Running full research workflow")
             
+            # First check if we already have work done in any of the phases
+            if state.final_report and len(state.final_report) > 500:
+                logger.info("Found existing final report - skipping to completed state")
+                state.log.append("Full research: Found existing final report - skipping to completed state")
+                state.status = "completed"
+                state.progress = 1.0
+                session["state"] = state
+                return state
+                
+            if state.summaries and len(state.summaries) > 0:
+                logger.info(f"Found existing summaries for {len(state.summaries)} questions - skipping to report generation")
+                state.log.append(f"Full research: Found existing summaries - skipping to report generation")
+                state.status = "summaries_completed"
+                state.progress = 0.9
+                try:
+                    state = generate_final_report(state)
+                    session["state"] = state
+                    return state
+                except Exception as e:
+                    logger.error(f"Error in generate_final_report during fast-forward: {str(e)}")
+                    state.errors.append(f"Error in generate_final_report: {str(e)}")
+            
+            if state.search_results and len(state.search_results) > 0:
+                logger.info(f"Found existing search results for {len(state.search_results)} questions - skipping to summarization")
+                state.log.append(f"Full research: Found existing search results - skipping to summarization")
+                state.status = "search_completed"
+                state.progress = 0.7
+                try:
+                    state = summarize_and_fact_check(state)
+                    if state.status == "summaries_completed":
+                        state = generate_final_report(state)
+                    session["state"] = state
+                    return state
+                except Exception as e:
+                    logger.error(f"Error in summarize_and_fact_check during fast-forward: {str(e)}")
+                    state.errors.append(f"Error in summarize_and_fact_check: {str(e)}")
+            
+            # If we don't have existing work, start from the beginning
             state.status = "query_refined"
             state.clarified_query = state.original_query
             
+            # Step 1: Decompose query
             try:
                 state = decompose_query(state)
             except Exception as e:
@@ -408,56 +467,71 @@ class ResearchOrchestrator:
                     ]
                 state.status = "query_decomposed"
             
-            if state.status == "query_decomposed" or state.status == "error":
+            # Step 2: Search web
+            if state.status == "query_decomposed":
                 try:
                     state = search_web(state)
                 except Exception as e:
                     logger.error(f"Error in search_web: {str(e)}")
-                    state.log.append(f"Error in search_web: {str(e)}, attempting to continue")
+                    state.log.append(f"Error in search_web: {str(e)}, marking research as failed")
                     state.errors.append(f"Error in search_web: {str(e)}")
-                    if not state.search_results and state.sub_questions:
-                        state.search_results = {}
-                        for question in state.sub_questions:
-                            state.search_results[question] = [
-                                f"No search results available for: {question}. Using fallback content."
-                            ]
-                    state.status = "search_completed"
+                    state.status = "error"
+                    session["state"] = state
+                    return state
             
-            if state.status == "search_completed" or state.status == "error":
+            # If we have no search results at this point, we cannot continue with valid research
+            if not state.search_results or len(state.search_results) == 0:
+                error_msg = "No search results available. Cannot continue with research."
+                logger.error(error_msg)
+                state.log.append(error_msg)
+                state.errors.append(error_msg)
+                state.status = "error"
+                session["state"] = state
+                return state
+            
+            # Step 3: Summarize and fact check
+            if state.status == "search_completed":
                 try:
                     state = summarize_and_fact_check(state)
                 except Exception as e:
                     logger.error(f"Error in summarize_and_fact_check: {str(e)}")
-                    state.log.append(f"Error in summarize_and_fact_check: {str(e)}, attempting to continue")
+                    state.log.append(f"Error in summarize_and_fact_check: {str(e)}, marking research as failed")
                     state.errors.append(f"Error in summarize_and_fact_check: {str(e)}")
-                    if not state.summaries and state.search_results:
-                        state.summaries = {}
-                        for question, results in state.search_results.items():
-                            state.summaries[question] = f"Based on limited information, {state.original_query} involves various concepts and applications. Due to processing limitations, a detailed summary could not be generated."
-                        state.fact_checked = {q: False for q in state.summaries}
-                    state.status = "summaries_completed"
+                    state.status = "error"
+                    session["state"] = state
+                    return state
             
-            if state.status == "summaries_completed" or state.status == "error":
+            # If we have no summaries at this point, we cannot continue with valid research
+            if not state.summaries or len(state.summaries) == 0:
+                error_msg = "No summaries available. Cannot continue with research."
+                logger.error(error_msg)
+                state.log.append(error_msg)
+                state.errors.append(error_msg)
+                state.status = "error"
+                session["state"] = state
+                return state
+            
+            # Step 4: Generate final report
+            if state.status == "summaries_completed":
                 try:
                     state = generate_final_report(state)
                 except Exception as e:
                     logger.error(f"Error in generate_final_report: {str(e)}")
-                    state.log.append(f"Error in generate_final_report: {str(e)}")
+                    state.log.append(f"Error in generate_final_report: {str(e)}, marking research as failed")
                     state.errors.append(f"Error in generate_final_report: {str(e)}")
-                    state.final_report = f"# Research Report on {state.original_query}\n\n"
-                    state.final_report += "## Executive Summary\n\n"
-                    state.final_report += f"This report provides an overview of {state.original_query}. Due to processing limitations, only basic information could be compiled.\n\n"
-                    
-                    if state.summaries:
-                        state.final_report += "## Key Findings\n\n"
-                        for question, summary in state.summaries.items():
-                            state.final_report += f"### {question}\n\n{summary}\n\n"
-                    
-                    state.final_report += "## Conclusion\n\n"
-                    state.final_report += f"Further research is recommended to gain a more comprehensive understanding of {state.original_query}."
-                    
-                    state.status = "completed"
-                    state.progress = 1.0
+                    state.status = "error"
+                    session["state"] = state
+                    return state
+            
+            # Final check to ensure we have a report
+            if not state.final_report or len(state.final_report) < 500:
+                error_msg = "Failed to generate a valid final report."
+                logger.error(error_msg)
+                state.log.append(error_msg)
+                state.errors.append(error_msg)
+                state.status = "error"
+                session["state"] = state
+                return state
             
             session["state"] = state
             

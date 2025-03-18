@@ -128,6 +128,7 @@ CRITICAL INSTRUCTIONS - READ CAREFULLY:
 6. DO NOT truncate or cut off your report before including all key information.
 7. DO NOT just provide an outline or table of contents - you must write the COMPLETE REPORT with all sections fully developed.
 8. Write the actual content for each section, not just section headings.
+9. PROVIDE DEFINITIVE CONCLUSIONS - do not just present both sides without taking a position.
 
 Create a well-structured, in-depth research report with:
 1. An executive summary (500-750 words)
@@ -142,10 +143,15 @@ Create a well-structured, in-depth research report with:
    - Include economic, social, political, and technological implications as relevant
    - Discuss short-term and long-term implications
    - Consider different stakeholder perspectives
-5. Detailed conclusion with recommendations (750-1000 words)
+5. Detailed conclusion with recommendations and a firm position (750-1000 words)
+   - Take a clear stance on the research question
+   - Provide strong, definitive answers based on the evidence
+   - Make specific, actionable recommendations
+   - Avoid vague, equivocal, or overly balanced statements
+   - Clearly state "the answer is X because of Y evidence"
 6. Extensive references section
 
-Use proper academic formatting with headings and subheadings. The tone should be formal, objective, and scholarly. Aim for a total report length of 5000-7000 words.
+Use proper academic formatting with headings and subheadings. The tone should be formal, objective, and scholarly, but conclusions should be definitive. Aim for a total report length of 5000-7000 words.
 
 IMPORTANT: You MUST include a "References" section at the end of the report that lists all sources mentioned in the summaries. Format each reference properly with the title and URL. Cite these references within the text of your report using [Source Title] format.
 
@@ -156,8 +162,9 @@ FINAL CHECK: Before submitting your report, verify that:
 4. All sections are fully developed with detailed information
 5. You have included all necessary references
 6. You have written the COMPLETE REPORT, not just an outline or table of contents
+7. Your conclusions are DEFINITIVE, not ambiguous or overly balanced
 
-Remember: Your report MUST be comprehensive and include ALL the key information from the summaries. Do not leave out important details or findings.
+Remember: Your report MUST be comprehensive and include ALL the key information from the summaries. Do not leave out important details or findings. Most importantly, provide clear, definitive conclusions and recommendations that directly answer the original research query.
 """
 
 EXECUTIVE_SUMMARY_PROMPT = """
@@ -174,14 +181,20 @@ CRITICAL INSTRUCTIONS - READ CAREFULLY:
 3. Your executive summary MUST be at least 1500 words in length, and ideally 2000-2500 words.
 4. If you find yourself running out of space, prioritize including ALL the key factual information from the summaries.
 5. DO NOT truncate or cut off your summary before including all key information.
+6. PROVIDE DEFINITIVE CONCLUSIONS - do not just present both sides without taking a position.
 
 Create a comprehensive 3-4 page executive summary (1500-2500 words) that includes:
 1. The key findings (focus on 5-7 main points with detailed explanation of each)
 2. Strategic implications (discuss short-term and long-term implications in detail)
 3. Recommendations (provide specific, actionable recommendations with rationale)
+   - Take a clear stance on the research question
+   - Provide strong, definitive answers based on the evidence
+   - Make specific, actionable recommendations
+   - Avoid vague, equivocal, or overly balanced statements
+   - Clearly state "the answer is X because of Y evidence"
 4. References to key sources
 
-The tone should be direct, business-oriented, and focused on actionable insights.
+The tone should be direct, business-oriented, and focused on actionable insights with definitive conclusions.
 Use bullet points for key information where appropriate, but provide detailed explanations for each point.
 
 IMPORTANT: You MUST include a "References" section at the end of the summary that lists all sources mentioned in the summaries. Format each reference properly with the title and URL. Cite these references within the text of your summary using [Source Title] format.
@@ -192,6 +205,9 @@ FINAL CHECK: Before submitting your executive summary, verify that:
 3. You have not truncated or cut off any sections
 4. All sections are fully developed with detailed information
 5. You have included all necessary references
+6. Your conclusions are DEFINITIVE, not ambiguous or overly balanced
+
+Most importantly, provide clear and definitive conclusions that directly answer the original research query.
 """
 
 BULLET_LIST_PROMPT = """
@@ -208,6 +224,7 @@ CRITICAL INSTRUCTIONS - READ CAREFULLY:
 3. Your report MUST be at least 2000 words in length, and ideally 2500-3000 words.
 4. If you find yourself running out of space, prioritize including ALL the key factual information from the summaries.
 5. DO NOT truncate or cut off your report before including all key information.
+6. PROVIDE DEFINITIVE CONCLUSIONS - do not just present both sides without taking a position.
 
 Create a comprehensive and detailed bullet-point report (2000-3000 words) that captures all key findings, organized into logical categories.
 Each main category should have:
@@ -217,7 +234,12 @@ Each main category should have:
 4. Sub-bullets where appropriate to provide additional detail
 
 Include a thorough introduction (300-500 words) before the bullet points explaining the context and importance of the research.
-Conclude with a summary section (300-500 words) that synthesizes the key findings.
+Conclude with a summary section (300-500 words) that synthesizes the key findings and provides definitive conclusions:
+- Take a clear stance on the research question
+- Provide strong, definitive answers based on the evidence
+- Make specific, actionable recommendations
+- Avoid vague, equivocal, or overly balanced statements
+- Clearly state "the answer is X because of Y evidence"
 
 IMPORTANT: You MUST include a "References" section at the end that lists all sources mentioned in the summaries. Format each reference properly with the title and URL. Cite these references within your bullet points using [Source Title] format.
 
@@ -227,4 +249,7 @@ FINAL CHECK: Before submitting your bullet-point report, verify that:
 3. You have not truncated or cut off any sections
 4. All sections are fully developed with detailed information
 5. You have included all necessary references
+6. Your conclusions are DEFINITIVE, not ambiguous or overly balanced
+
+Most importantly, provide clear and definitive conclusions that directly answer the original research query.
 """

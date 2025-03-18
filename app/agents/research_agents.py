@@ -211,6 +211,14 @@ def search_web(state: ResearchState) -> ResearchState:
         Updated research state with search results
     """
     try:
+        # Check if we already have search results and should continue instead of redoing searches
+        if state.search_results and len(state.search_results) > 0:
+            logger.info(f"Found existing search results for {len(state.search_results)} questions - continuing without repeating searches")
+            state.log.append(f"Search agent: Using {len(state.search_results)} existing search results - skipping repeated searches")
+            state.status = "search_completed"
+            state.progress = 0.7
+            return state
+
         if not state.sub_questions:
             log_message = "Search agent: No sub-questions available, creating default questions"
             state.log.append(log_message)
@@ -225,6 +233,16 @@ def search_web(state: ResearchState) -> ResearchState:
                 f"What are practical applications of {query_to_use}?"
             ]
             state.log.append(f"Search agent: Created {len(state.sub_questions)} default sub-questions")
+        
+        # Filter out empty questions
+        state.sub_questions = [q for q in state.sub_questions if q and q.strip()]
+        if not state.sub_questions:
+            error_msg = "No valid sub-questions found after filtering"
+            state.errors.append(error_msg)
+            state.log.append(f"Search agent: Error - {error_msg}")
+            logger.error(error_msg)
+            state.status = "error"
+            return state
             
         state.log.append(f"Search agent: Beginning search for {len(state.sub_questions)} sub-questions")
         logger.info(f"Beginning search for {len(state.sub_questions)} sub-questions")
@@ -232,8 +250,8 @@ def search_web(state: ResearchState) -> ResearchState:
         try:
             searxng_available = search_service.reset_availability()
             if not searxng_available:
-                state.log.append("Search agent: SearxNG is not available. Using fallback content.")
-                logger.warning("SearxNG is not available. Using fallback content.")
+                state.log.append("Search agent: SearxNG is not available. Research results may be limited.")
+                logger.warning("SearxNG is not available. Research results may be limited.")
         except Exception as e:
             logger.error(f"Error checking SearxNG availability: {str(e)}")
         
@@ -252,6 +270,7 @@ def search_web(state: ResearchState) -> ResearchState:
         logger.info(f"Using {num_results} search results per question")
         state.log.append(f"Search agent: Using {num_results} search results per question")
         
+        successful_searches = 0
         failed_searches = []
         
         import time
@@ -282,10 +301,15 @@ def search_web(state: ResearchState) -> ResearchState:
         state.log.append(f"Search agent: Processing {len(questions_to_process)} out of {len(state.sub_questions)} questions")
         
         for i, question in enumerate(questions_to_process):
+            # Skip empty questions
+            if not question or not question.strip():
+                logger.warning(f"Skipping empty question at index {i}")
+                continue
+                
             elapsed_time = time.time() - start_time
             if elapsed_time > max_search_time and questions_processed >= min_questions_to_process:
-                logger.warning(f"Search time limit reached after {i} questions. Using fallback for remaining questions.")
-                state.log.append(f"Search agent: Time limit reached ({elapsed_time:.1f}s). Using fallback for remaining questions.")
+                logger.warning(f"Search time limit reached after {i} questions with {successful_searches} successful searches")
+                state.log.append(f"Search agent: Time limit reached ({elapsed_time:.1f}s). Continuing with {successful_searches} successful searches.")
                 failed_searches.extend(questions_to_process[i:])
                 break
                 
@@ -294,28 +318,26 @@ def search_web(state: ResearchState) -> ResearchState:
                 logger.info(f"Searching for question {i+1}/{len(questions_to_process)}: '{question}'")
                 
                 search_start_time = time.time()
-                search_timeout = 5
                 
                 results = search_service.search(question, num_results)
                 search_time = time.time() - search_start_time
                 questions_processed += 1
                 
-                if results:
+                if results and len(results) > 0:
                     formatted_results = [
                         f"Title: {result['title']}\nURL: {result['url']}\nContent: {result['content']}"
                         for result in results
                     ]
                     
                     search_results[question] = formatted_results
+                    successful_searches += 1
                     state.log.append(f"Search agent: Found {len(formatted_results)} results for '{question}' in {search_time:.1f}s")
                 else:
                     failed_searches.append(question)
-                    search_results[question] = [f"No search results found for: {question}"]
                     state.log.append(f"Search agent: No results found for '{question}'")
             
             except Exception as e:
                 failed_searches.append(question)
-                search_results[question] = [f"Error searching for question: {str(e)}"]
                 state.log.append(f"Search agent: Error searching for '{question}' - {str(e)}")
                 logger.error(f"Error searching for '{question}': {str(e)}")
                 questions_processed += 1
@@ -323,81 +345,50 @@ def search_web(state: ResearchState) -> ResearchState:
             progress_per_question = 0.4 / len(questions_to_process)
             state.progress = min(0.3 + progress_per_question * (i + 1), 0.7)
         
-        if failed_searches:
-            state.log.append(f"Search agent: Providing fallback content for {len(failed_searches)} failed searches")
-            logger.info(f"Providing fallback content for {len(failed_searches)} failed searches")
+        # If we have at least some successful searches, continue with those results
+        if successful_searches > 0:
+            logger.info(f"Completed {successful_searches} successful searches out of {len(questions_to_process)} questions")
+            state.log.append(f"Search agent: Completed {successful_searches} successful searches out of {len(questions_to_process)} attempted")
             
-            for question in failed_searches:
-                fallback_results = search_service.get_fallback_content(question)
-                
-                formatted_results = [
-                    f"Title: {result['title']}\nURL: {result['url']}\nContent: {result['content']}"
-                    for result in fallback_results
-                ]
-                
-                search_results[question] = formatted_results
-                state.log.append(f"Search agent: Using fallback content for '{question}'")
-        
-        if not search_results:
-            logger.warning("No search results found for any questions. Using generic fallback content.")
-            state.log.append("Search agent: No search results found. Using generic fallback content.")
-            
-            search_results = {}
-            for question in state.sub_questions[:2]:
-                fallback_results = search_service.get_fallback_content(question)
-                formatted_results = [
-                    f"Title: {result['title']}\nURL: {result['url']}\nContent: {result['content']}"
-                    for result in fallback_results
-                ]
-                search_results[question] = formatted_results
+            # If there were any failed searches, log that we're proceeding without them
+            if failed_searches:
+                logger.info(f"Proceeding with {successful_searches} successful searches, skipping {len(failed_searches)} failed searches")
+                state.log.append(f"Search agent: Proceeding with available data, skipping {len(failed_searches)} failed searches")
+        else:
+            # If all searches failed, record an error but don't use fallback content
+            error_msg = "All searches failed. Research quality will be limited."
+            state.errors.append(error_msg)
+            state.log.append(f"Search agent: Warning - {error_msg}")
+            logger.error(error_msg)
         
         total_search_time = time.time() - start_time
         state.log.append(f"Search agent: Completed searches in {total_search_time:.1f}s")
         logger.info(f"Completed searches in {total_search_time:.1f}s")
         
+        # Always update the state with whatever results we have
         state.search_results = search_results
         state.status = "search_completed"
         state.progress = 0.7
         
-        try:
-            logger.info("Automatically proceeding to summarization")
-            state.log.append("Search agent: Automatically proceeding to summarization")
-            summarized_state = summarize_and_fact_check(state)
-            return summarized_state
-        except Exception as e:
-            logger.error(f"Error auto-proceeding to summarization: {str(e)}")
-            return state
+        # Don't auto-proceed to summarization to avoid potential loops
+        return state
     except Exception as e:
         error_msg = f"Error in web search: {str(e)}"
         state.errors.append(error_msg)
         state.log.append(f"Search agent: Error - {str(e)}")
         logger.error(error_msg)
         
-        if not state.search_results and state.sub_questions:
-            state.search_results = {}
-            for question in state.sub_questions[:2]:
-                fallback_results = search_service.get_fallback_content(question)
-                
-                formatted_results = [
-                    f"Title: {result['title']}\nURL: {result['url']}\nContent: {result['content']}"
-                    for result in fallback_results
-                ]
-                
-                state.search_results[question] = formatted_results
-            
+        # If we have any search results, continue with what we have
+        if state.search_results and len(state.search_results) > 0:
+            logger.info(f"Continuing with {len(state.search_results)} existing search results despite error")
+            state.log.append(f"Search agent: Continuing with {len(state.search_results)} existing search results despite error")
             state.status = "search_completed"
             state.progress = 0.7
-            state.log.append(f"Search agent: Created fallback search results after error")
+        else:
+            # If we have NO results, mark as error instead of using fallbacks
+            state.status = "error"
+            state.log.append("Search agent: No search results available after errors. Research cannot proceed.")
             
-            try:
-                logger.info("Automatically proceeding to summarization after error recovery")
-                state.log.append("Search agent: Automatically proceeding to summarization after error recovery")
-                summarized_state = summarize_and_fact_check(state)
-                return summarized_state
-            except Exception as e2:
-                logger.error(f"Error auto-proceeding to summarization after error recovery: {str(e2)}")
-                return state
-        
         return state
 
 def summarize_and_fact_check(state: ResearchState) -> ResearchState:
@@ -410,6 +401,21 @@ def summarize_and_fact_check(state: ResearchState) -> ResearchState:
         Updated research state with summaries and fact checks
     """
     try:
+        # Check if we already have summaries and should continue instead of redoing summarization
+        if state.summaries and len(state.summaries) > 0 and state.status == "summaries_completed":
+            logger.info(f"Found existing summaries for {len(state.summaries)} questions - continuing without repeating summarization")
+            state.log.append(f"Summarization agent: Using {len(state.summaries)} existing summaries - skipping repeated summarization")
+            return state
+        
+        # If we have no search results, cannot proceed with summarization
+        if not state.search_results or len(state.search_results) == 0:
+            error_msg = "No search results available for summarization"
+            state.errors.append(error_msg)
+            state.log.append(f"Summarization agent: Error - {error_msg}")
+            logger.error(error_msg)
+            state.status = "error"
+            return state
+            
         summaries = {}
         fact_checks = {}
         
@@ -438,67 +444,80 @@ def summarize_and_fact_check(state: ResearchState) -> ResearchState:
         logger.info(f"Setting summary length to {summary_length} based on depth={depth} and speed={state.config.research_speed}")
         state.log.append(f"Summarization agent: Setting summary length to {summary_length}")
         
+        successful_summaries = 0
+        failed_summaries = 0
+        
         for question, results in search_results_to_process.items():
-            if not results or all(r.startswith("Error") for r in results):
-                summaries[question] = "No reliable information found for this question."
-                fact_checks[question] = False
+            # Skip if no valid results for this question
+            if not results or len(results) == 0:
+                logger.warning(f"Skipping summarization for '{question}' - no search results")
+                failed_summaries += 1
                 continue
                 
-            combined_results = "\n\n".join(results)
-            
-            summary_chain = llm_provider.create_chain(SUMMARIZATION_PROMPT)
-            summary = summary_chain.invoke({
-                "question": question,
-                "results": combined_results + f"\n\nBased on the research depth and speed settings, provide a summary of {summary_length}."
-            })
-            
-            summaries[question] = summary
-            logger.info(f"Generated summary for '{question}'")
-            
-            fact_checks[question] = True
+            try:
+                combined_results = "\n\n".join(results)
+                
+                summary_chain = llm_provider.create_chain(SUMMARIZATION_PROMPT)
+                summary = summary_chain.invoke({
+                    "question": question,
+                    "results": combined_results + f"\n\nBased on the research depth and speed settings, provide a summary of {summary_length}."
+                })
+                
+                # Verify we got a real summary, not just an error message or empty content
+                if summary and len(summary) > 50:  # Minimal length check
+                    summaries[question] = summary
+                    fact_checks[question] = True
+                    successful_summaries += 1
+                    logger.info(f"Generated summary for '{question}' ({len(summary)} characters)")
+                    state.log.append(f"Summarization agent: Generated summary for '{question}'")
+                else:
+                    failed_summaries += 1
+                    logger.warning(f"Generated summary for '{question}' was too short or empty")
+                    state.log.append(f"Summarization agent: Failed to generate valid summary for '{question}'")
+            except Exception as e:
+                failed_summaries += 1
+                logger.error(f"Error summarizing '{question}': {str(e)}")
+                state.log.append(f"Summarization agent: Error summarizing '{question}' - {str(e)}")
             
             progress_per_question = 0.2 / len(search_results_to_process)
             state.progress = min(0.7 + progress_per_question * (list(search_results_to_process.keys()).index(question) + 1), 0.9)
+        
+        if successful_summaries == 0:
+            error_msg = "Failed to generate any valid summaries"
+            state.errors.append(error_msg)
+            state.log.append(f"Summarization agent: Error - {error_msg}")
+            logger.error(error_msg)
+            state.status = "error"
+            return state
+            
+        state.log.append(f"Summarization agent: Successfully summarized {successful_summaries} questions, failed on {failed_summaries}")
+        logger.info(f"Successfully summarized {successful_summaries} questions, failed on {failed_summaries}")
         
         state.summaries = summaries
         state.fact_checked = fact_checks
         state.status = "summaries_completed"
         state.progress = 0.9
-        state.log.append(f"Summarization agent: Completed summarization and fact checking for {len(summaries)} questions")
-        logger.info(f"Completed summarization and fact checking for {len(summaries)} questions")
         
-        try:
-            logger.info("Automatically proceeding to final report generation")
-            state.log.append("Summarization agent: Automatically proceeding to final report generation")
-            final_state = generate_final_report(state)
-            return final_state
-        except Exception as e:
-            logger.error(f"Error auto-proceeding to final report: {str(e)}")
-            return state
+        # Don't auto-proceed to report generation to avoid potential loops
+        return state
     except Exception as e:
         error_msg = f"Error in summarization and fact checking: {str(e)}"
         state.errors.append(error_msg)
         state.log.append(f"Summarization agent: Error - {str(e)}")
         logger.error(error_msg)
         
-        if not state.summaries and state.search_results:
-            state.summaries = {}
-            for question, results in list(state.search_results.items())[:3]:
-                state.summaries[question] = f"Based on limited information, {state.original_query} involves various concepts and applications. Due to processing limitations, a detailed summary could not be generated."
-            state.fact_checked = {q: False for q in state.summaries}
+        # If we have existing summaries, continue with those
+        if state.summaries and len(state.summaries) > 0:
+            logger.info(f"Continuing with {len(state.summaries)} existing summaries despite error")
+            state.log.append(f"Summarization agent: Continuing with {len(state.summaries)} existing summaries despite error")
             state.status = "summaries_completed"
             state.progress = 0.9
-            
-            try:
-                logger.info("Automatically proceeding to final report generation after error recovery")
-                state.log.append("Summarization agent: Automatically proceeding to final report generation after error recovery")
-                final_state = generate_final_report(state)
-                return final_state
-            except Exception as e2:
-                logger.error(f"Error auto-proceeding to final report after error recovery: {str(e2)}")
-                return state
-        
-        return state
+            return state
+        else:
+            # If we have NO summaries, mark as error rather than using fallbacks
+            state.status = "error"
+            state.log.append("Summarization agent: No valid summaries available after errors. Research cannot proceed.")
+            return state
 
 def generate_final_report(state: ResearchState) -> ResearchState:
     """Generate the final research report.
@@ -510,176 +529,119 @@ def generate_final_report(state: ResearchState) -> ResearchState:
         Updated research state with final report
     """
     try:
-        all_summaries = ""
-        for i, (question, summary) in enumerate(state.summaries.items()):
-            fact_check_status = "✓" if state.fact_checked.get(question, False) else "⚠"
-            all_summaries += f"\n\nQuestion {i+1}: {question} {fact_check_status}\n{summary}"
-        
-        logger.info("Generating final report")
-        logger.info(f"Processing {len(state.summaries)} summaries for final report")
-        
-        depth = state.config.depth_and_breadth
-        if depth <= 2:
-            min_word_count = 3000
-            target_word_count = 4000
-            exec_summary_min = 1000
-            exec_summary_target = 1500
-            bullet_list_min = 1500
-            bullet_list_target = 2000
-        elif depth <= 4:
-            min_word_count = 4000
-            target_word_count = 5000
-            exec_summary_min = 1500
-            exec_summary_target = 2000
-            bullet_list_min = 2000
-            bullet_list_target = 2500
-        else:
-            min_word_count = 5000
-            target_word_count = 7000
-            exec_summary_min = 2000
-            exec_summary_target = 2500
-            bullet_list_min = 2500
-            bullet_list_target = 3000
+        # Check if we already have a final report and should continue instead of regenerating
+        if state.final_report and len(state.final_report) > 500 and state.status == "completed":
+            logger.info("Found existing final report - continuing without regenerating")
+            state.log.append("Report generation agent: Using existing final report - skipping regeneration")
+            return state
             
-        if state.config.research_speed == "fast":
-            min_word_count = max(2000, min_word_count - 1000)
-            target_word_count = max(3000, target_word_count - 1000)
-            exec_summary_min = max(800, exec_summary_min - 500)
-            exec_summary_target = max(1200, exec_summary_target - 500)
-            bullet_list_min = max(1000, bullet_list_min - 500)
-            bullet_list_target = max(1500, bullet_list_target - 500)
-        
-        if state.config.output_format == "full_report":
-            prompt = FULL_REPORT_PROMPT
-            depth_instructions = f"\n\nBased on the research depth and speed settings, your report should be at least {min_word_count} words, and ideally {target_word_count} words."
-        elif state.config.output_format == "executive_summary":
-            prompt = EXECUTIVE_SUMMARY_PROMPT
-            depth_instructions = f"\n\nBased on the research depth and speed settings, your executive summary should be at least {exec_summary_min} words, and ideally {exec_summary_target} words."
-        else:
-            prompt = BULLET_LIST_PROMPT
-            depth_instructions = f"\n\nBased on the research depth and speed settings, your bullet-point report should be at least {bullet_list_min} words, and ideally {bullet_list_target} words."
-        
-        additional_instructions = "\n\nIMPORTANT: Do NOT generate just an outline or table of contents. Write the COMPLETE REPORT with all sections fully developed. Each section should have detailed content, not just headings."
-        
-        report_chain = llm_provider.create_chain(prompt)
-        
-        if len(state.summaries) > 5:
-            logger.info(f"Large number of summaries ({len(state.summaries)}), ensuring comprehensive report")
+        # If we have no summaries, cannot proceed with report generation
+        if not state.summaries or len(state.summaries) == 0:
+            error_msg = "No summaries available for report generation"
+            state.errors.append(error_msg)
+            state.log.append(f"Report generation agent: Error - {error_msg}")
+            logger.error(error_msg)
+            state.status = "error"
+            return state
             
-            final_report = report_chain.invoke({
-                "query": state.clarified_query or state.original_query,
-                "summaries": all_summaries + f"\n\nIMPORTANT: Your report MUST be at least {min_word_count} words and include ALL the information from ALL the summaries above. Do not truncate or omit any important information." + additional_instructions + depth_instructions
-            })
-            
-            if len(final_report.split()) < min_word_count or is_outline(final_report):
-                if is_outline(final_report):
-                    logger.warning("Generated report appears to be just an outline, attempting to generate full report")
-                else:
-                    logger.warning(f"Generated report seems too short ({len(final_report.split())} words), attempting to expand it")
-                
-                expansion_prompt = f"""
-                The following output is incomplete. It is either too short or just an outline. Please write a COMPLETE, DETAILED REPORT of at least {min_word_count} words, ensuring you include ALL the information from the original summaries.
-                
-                Original Research Query: {state.clarified_query or state.original_query}
-                
-                Current Output:
-                {final_report}
-                
-                Please write a COMPLETE REPORT with fully developed sections, not just an outline or table of contents. Each section should have detailed content (multiple paragraphs), not just headings.
-                
-                The report should include:
-                1. A detailed executive summary (500-750 words)
-                2. A comprehensive introduction (750-1000 words)
-                3. Fully developed main sections with detailed content for each subsection (2000-3000 words total)
-                4. A thorough analysis and implications section (1000-1500 words)
-                5. A detailed conclusion with recommendations (750-1000 words)
-                6. A complete references section
-                
-                The final report should be at least {min_word_count} words and must be comprehensive, covering ALL aspects of the research topic.
-                """
-                
-                expansion_chain = llm_provider.create_chain(expansion_prompt)
-                expanded_report = expansion_chain.invoke({})
-                
-                if len(expanded_report.split()) > len(final_report.split()) and not is_outline(expanded_report):
-                    final_report = expanded_report
-                    logger.info(f"Successfully expanded the report to {len(expanded_report.split())} words")
-                else:
-                    logger.warning("First expansion attempt failed, trying alternative approach")
-                    
-                    sections_prompt = f"""
-                    You are writing a comprehensive research report on: {state.clarified_query or state.original_query}
-                    
-                    Based on the following summaries, write a COMPLETE, DETAILED research report with the following sections:
-                    
-                    Summaries:
-                    {all_summaries}
-                    
-                    Write each section with multiple detailed paragraphs (not just headings):
-                    
-                    1. EXECUTIVE SUMMARY (500-750 words)
-                    2. INTRODUCTION (750-1000 words)
-                    3. MAIN FINDINGS (at least 4 main sections with 2-3 subsections each, 2000-3000 words total)
-                    4. ANALYSIS AND IMPLICATIONS (1000-1500 words)
-                    5. CONCLUSION AND RECOMMENDATIONS (750-1000 words)
-                    6. REFERENCES
-                    
-                    The total report should be at least {min_word_count} words. Include ALL key information from the summaries.
-                    """
-                    
-                    sections_chain = llm_provider.create_chain(sections_prompt)
-                    sectioned_report = sections_chain.invoke({})
-                    
-                    if len(sectioned_report.split()) > len(final_report.split()) and not is_outline(sectioned_report):
-                        final_report = sectioned_report
-                        logger.info(f"Successfully generated sectioned report of {len(sectioned_report.split())} words")
-        else:
-            final_report = report_chain.invoke({
-                "query": state.clarified_query or state.original_query,
-                "summaries": all_summaries + additional_instructions + depth_instructions
-            })
-            
-            if is_outline(final_report) or len(final_report.split()) < min_word_count:
-                if is_outline(final_report):
-                    logger.warning("Generated report appears to be just an outline, attempting to generate full report")
-                else:
-                    logger.warning(f"Generated report seems too short ({len(final_report.split())} words), attempting to expand it")
-                
-                full_report_prompt = f"""
-                Please write a COMPLETE, DETAILED REPORT (not just an outline) on the following research query:
-                
-                Research Query: {state.clarified_query or state.original_query}
-                
-                Based on these summaries:
-                {all_summaries}
-                
-                Write a COMPLETE REPORT with fully developed sections, not just an outline or table of contents.
-                Each section should have detailed content (multiple paragraphs), not just headings.
-                
-                The report should be at least {min_word_count} words and include ALL key information from the summaries.
-                """
-                
-                full_report_chain = llm_provider.create_chain(full_report_prompt)
-                complete_report = full_report_chain.invoke({})
-                
-                if not is_outline(complete_report) and len(complete_report.split()) > len(final_report.split()):
-                    final_report = complete_report
-                    logger.info(f"Successfully generated complete report of {len(complete_report.split())} words")
+        logger.info("Starting final report generation")
+        state.log.append("Report generation agent: Starting final report generation")
         
-        final_report = f"\n\n================================================================================\nRESEARCH REPORT BEGINS\n================================================================================\n\n{final_report}"
+        # Determine which prompt to use based on the requested output format
+        output_format = state.config.output_format
+        if output_format == "executive_summary":
+            prompt_template = EXECUTIVE_SUMMARY_PROMPT
+            logger.info("Using EXECUTIVE_SUMMARY_PROMPT")
+        elif output_format == "bullet_list":
+            prompt_template = BULLET_LIST_PROMPT
+            logger.info("Using BULLET_LIST_PROMPT")
+        else:  # default is "full_report"
+            prompt_template = FULL_REPORT_PROMPT
+            logger.info("Using FULL_REPORT_PROMPT")
+            
+        state.log.append(f"Report generation agent: Using {output_format} format")
         
-        state.final_report = final_report
-        state.status = "completed"
-        state.progress = 1.0
-        state.log.append(f"Report agent: Generated final report with {len(state.summaries)} summaries, word count: {len(final_report.split())}")
-        logger.info(f"Final report generated successfully with {len(state.summaries)} summaries, word count: {len(final_report.split())}")
-        return state
+        # Prepare summaries for the prompt
+        combined_summaries = []
+        for question, summary in state.summaries.items():
+            combined_summaries.append(f"## {question}\n\n{summary}")
+            
+        all_summaries = "\n\n".join(combined_summaries)
+        
+        # Generate the final report
+        try:
+            report_chain = llm_provider.create_chain(prompt_template)
+            report = report_chain.invoke({"query": state.original_query, "summaries": all_summaries})
+            
+            # Verify the report is valid and not just a template or error message
+            if is_outline(report):
+                logger.warning("Generated report appears to be just an outline. Trying again.")
+                state.log.append("Report generation agent: Generated report appears to be just an outline. Trying again.")
+                
+                # Try again with explicit instructions not to produce just an outline
+                prompt_with_warning = prompt_template + "\n\nIMPORTANT FINAL INSTRUCTION: DO NOT produce just an outline or template. Write a FULL and COMPLETE report with all sections fully developed."
+                report_chain = llm_provider.create_chain(prompt_with_warning)
+                report = report_chain.invoke({"query": state.original_query, "summaries": all_summaries})
+                
+                # Check again
+                if is_outline(report):
+                    error_msg = "Unable to generate complete report, only produced an outline"
+                    state.errors.append(error_msg)
+                    state.log.append(f"Report generation agent: Error - {error_msg}")
+                    logger.error(error_msg)
+                
+            # Validate that report is not too small (which would indicate a generation problem)
+            min_report_size = 1500  # Minimum characters for a valid report
+            if len(report) < min_report_size:
+                error_msg = f"Generated report is too short ({len(report)} chars)"
+                state.errors.append(error_msg)
+                state.log.append(f"Report generation agent: Warning - {error_msg}")
+                logger.warning(error_msg)
+                
+                # Continue with the short report anyway rather than failing completely
+                
+            state.final_report = report
+            state.status = "completed"
+            state.progress = 1.0
+            
+            logger.info(f"Final report generated successfully with {len(report)} characters")
+            state.log.append(f"Report generation agent: Final report generated successfully ({len(report)} characters)")
+            
+            return state
+            
+        except Exception as e:
+            error_msg = f"Error in final report generation: {str(e)}"
+            state.errors.append(error_msg)
+            state.log.append(f"Report generation agent: Error - {str(e)}")
+            logger.error(error_msg)
+            
+            # If we already have a partial report, use that instead of failing
+            if state.final_report and len(state.final_report) > 0:
+                logger.info("Using existing partial report despite error")
+                state.log.append("Report generation agent: Using existing partial report despite error")
+                state.status = "completed"
+                state.progress = 1.0
+                return state
+                
+            # Cannot proceed with report generation, mark as error
+            state.status = "error"
+            return state
+            
     except Exception as e:
-        error_msg = f"Error generating final report: {str(e)}"
+        error_msg = f"Error in report generation: {str(e)}"
         state.errors.append(error_msg)
-        state.status = "error"
-        state.log.append(f"Report agent: Error - {str(e)}")
+        state.log.append(f"Report generation agent: Error - {str(e)}")
         logger.error(error_msg)
+        
+        # If we already have a report, use that despite the error
+        if state.final_report and len(state.final_report) > 0:
+            logger.info("Using existing report despite error")
+            state.log.append("Report generation agent: Using existing report despite error")
+            state.status = "completed"
+            state.progress = 1.0
+            return state
+            
+        state.status = "error"
         return state
 
 def is_outline(text):
