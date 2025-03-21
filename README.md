@@ -4,9 +4,9 @@ An automated research assistant that uses LLMs and web search to conduct compreh
 
 > **Getting Started in 30 Seconds**
 > 
-> **Windows**: Run `run.bat cli` in Command Prompt
+> **Windows**: Run `run.bat docker` then `run.bat cli` in Command Prompt
 > 
-> **Mac/Linux**: Run `chmod +x run.sh` then `./run.sh cli` in Terminal
+> **Mac/Linux**: Run `chmod +x run.sh` then `./run.sh docker` and `./run.sh cli` in Terminal
 > 
 > First time? See the [Quick Start Guide](#quick-start-guide) below.
 
@@ -14,25 +14,54 @@ An automated research assistant that uses LLMs and web search to conduct compreh
 
 ### For First-Time Users
 
-1. **Get a HuggingFace API Token**:
+1. **Prerequisites**:
+   - Install [Docker](https://www.docker.com/products/docker-desktop/) and Docker Compose (usually included with Docker Desktop)
+   - Make sure you have Python 3.10 or newer installed
+
+2. **Get a HuggingFace API Token**:
    - Create a free account at [HuggingFace](https://huggingface.co/)
    - Go to your profile → Settings → Access Tokens
    - Create a new token and copy it
 
-2. **Set Up Your Environment**:
-   - Make sure you have Python 3.10 or newer installed
+3. **Set Up Your Environment**:
    - Copy the `.env.example` file to `.env` in the project folder
    - Replace `your_huggingface_token_here` with your actual token
    - Example: `HUGGINGFACE_API_TOKEN=hf_abcdefghijklmnopqrstuvwxyz`
 
-3. **Run the Application**:
+4. **Run the Application with Docker (Recommended)**:
+
+   **On Windows**:
+   ```
+   # Start all services with Docker (including SearxNG for web searches)
+   run.bat docker
+
+   # In a new terminal window, start the CLI interface
+   run.bat cli
+   ```
+
+   **On Linux/macOS**:
+   ```
+   # Make the script executable (first time only)
+   chmod +x run.sh
+
+   # Start all services with Docker (including SearxNG for web searches)
+   ./run.sh docker
+
+   # In a new terminal window, start the CLI interface
+   ./run.sh cli
+   ```
+
+5. **Alternative: Run Without Docker (NOT recommended for first-time users)**:
 
    **On Windows**:
    ```
    # Install dependencies (first time only)
    run.bat install
 
-   # Start the application
+   # Start the API server
+   run.bat api
+
+   # In a new terminal window, start the CLI interface
    run.bat cli
    ```
 
@@ -44,11 +73,16 @@ An automated research assistant that uses LLMs and web search to conduct compreh
    # Install dependencies (first time only)
    ./run.sh install
 
-   # Start the application
+   # Start the API server
+   ./run.sh api
+
+   # In a new terminal window, start the CLI interface
    ./run.sh cli
    ```
 
-4. **Start Researching**:
+   > **Note**: Running without Docker will disable SearxNG web search functionality, significantly limiting research capabilities. Docker is strongly recommended.
+
+6. **Start Researching**:
    - Enter your research question when prompted
    - Configure your research parameters (or accept the defaults)
    - Answer any clarification questions
@@ -76,11 +110,19 @@ The entire process typically takes 5-15 minutes depending on your research depth
 
 **On Windows**:
 ```
+# Start Docker services (if not already running)
+run.bat docker
+
+# In a new terminal window
 run.bat cli
 ```
 
 **On Linux/macOS**:
 ```
+# Start Docker services (if not already running)
+./run.sh docker
+
+# In a new terminal window
 ./run.sh cli
 ```
 
@@ -101,10 +143,10 @@ The CLI is the easiest way to use OpenResearch. It provides an interactive exper
 #### Basic Usage
 
 ```bash
-# On Windows
+# On Windows (after starting Docker services)
 run.bat cli
 
-# On Linux/macOS
+# On Linux/macOS (after starting Docker services)
 ./run.sh cli
 ```
 
@@ -143,13 +185,14 @@ When running the CLI, you'll be prompted to configure your research:
 
 ### Advanced Setup Options
 
-#### Running with Docker
+#### Running with Docker (Recommended)
 
-If you prefer to use Docker (requires Docker and Docker Compose installed):
+The Docker setup provides all necessary services including the SearxNG search engine:
 
 ```bash
 # Build and start all services
-docker-compose up --build
+run.bat docker  # Windows
+./run.sh docker  # Linux/macOS
 
 # Access the API at http://localhost:8001
 ```
@@ -157,12 +200,13 @@ docker-compose up --build
 Then use the CLI to interact with the API:
 
 ```bash
-python cli.py --api-url http://localhost:8001
+run.bat cli  # Windows
+./run.sh cli  # Linux/macOS
 ```
 
-#### Running the API Server Only
+#### Running the API Server Without Docker (Limited Functionality)
 
-If you want to run just the API server (for development or integration):
+If you cannot use Docker for some reason:
 
 ```bash
 # On Windows
@@ -172,7 +216,7 @@ run.bat api
 ./run.sh api
 ```
 
-The API will be available at http://localhost:8001
+The API will be available at http://localhost:8001, but SearxNG search functionality will be limited.
 
 ## Troubleshooting
 
@@ -190,9 +234,9 @@ The API will be available at http://localhost:8001
    - The CLI will automatically continue if research stalls
    - You can manually force continuation by pressing Ctrl+C and restarting with the same session ID
 
-4. **SearxNG Issues**:
-   - If SearxNG search is unavailable, the system will automatically use fallback content
-   - No action required - the research will continue with slightly less specific information
+4. **"Failed to search with SearxNG"**:
+   - Make sure you're running the application with Docker (`run.bat docker`)
+   - If SearxNG fails after many searches, it might be rate-limited - try again later
 
 ### Getting Help
 
